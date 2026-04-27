@@ -1,4 +1,4 @@
-# VESTIA — Clasificador de Ropa con SVM
+# SVM — Clasificador de Ropa con SVM
 
 ## Estructura del proyecto
 ```
