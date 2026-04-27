@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VESTIA — Clasificador de Ropa IA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & Variables ─────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0a0a0a;
+  --surface:   #111111;
+  --border:    #222222;
+  --accent:    #c8a96e;
+  --accent2:   #7c6a4f;
+  --text:      #f8f6f0;
+  --muted:     #b8b0a0;
+  --success:   #6dbf87;
+  --error:     #d4635a;
+  --glow:      rgba(200, 169, 110, 0.15);
+}
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Grain texture overlay ──────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 1000;
+      opacity: 0.4;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 2rem 3rem;
+      display: flex;
+      align-items: baseline;
+      gap: 1.5rem;
+      position: relative;
+    }
+
+    .logo {
+      font-family: 'Playfair Display', serif;
+      font-size: 2.4rem;
+      font-weight: 900;
+      letter-spacing: -0.03em;
+      color: var(--accent);
+      line-height: 1;
+    }
+
+    .logo-sub {
+      font-size: 0.65rem;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .model-badge {
+      margin-left: auto;
+      border: 1px solid var(--border);
+      padding: 0.4rem 0.9rem;
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    /* ── Main layout ────────────────────────────────────────────── */
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      min-height: calc(100vh - 100px);
+    }
+
+    /* ── Upload Panel ───────────────────────────────────────────── */
+    .panel-upload {
+      border-right: 1px solid var(--border);
+      padding: 3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+    }
+
+    .panel-label {
+      font-size: 0.6rem;
+      letter-spacing: 0.35em;
+      text-transform: uppercase;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .panel-label::before {
+      content: '';
+      width: 1.5rem;
+      height: 1px;
+      background: var(--muted);
+    }
+
+    .panel-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 2rem;
+      font-weight: 700;
+      line-height: 1.2;
+      color: var(--text);
+    }
+
+    /* ── Drop Zone ──────────────────────────────────────────────── */
+    .drop-zone {
+      border: 1px dashed var(--border);
+      aspect-ratio: 1;
+      max-height: 360px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      cursor: pointer;
+      transition: border-color 0.3s, background 0.3s, box-shadow 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--accent);
+      background: var(--glow);
+      box-shadow: inset 0 0 40px rgba(200,169,110,0.06);
+    }
+
+    .drop-zone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .drop-icon {
+      font-size: 3rem;
+      opacity: 0.3;
+      transition: opacity 0.3s, transform 0.3s;
+    }
+
+    .drop-zone:hover .drop-icon { opacity: 0.7; transform: scale(1.1); }
+
+    .drop-text {
+      font-size: 0.7rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .drop-hint {
+      font-size: 0.6rem;
+      color: var(--muted);
+      opacity: 0.5;
+    }
+
+    /* ── Preview ────────────────────────────────────────────────── */
+    #preview-img {
+      display: none;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      padding: 1rem;
+      filter: grayscale(0.2) contrast(1.05);
+    }
+
+    .drop-zone.has-image .drop-icon,
+    .drop-zone.has-image .drop-text,
+    .drop-zone.has-image .drop-hint { display: none; }
+
+    .drop-zone.has-image #preview-img { display: block; }
+
+    /* ── Analyze Button ─────────────────────────────────────────── */
+    .btn-analyze {
+      border: 1px solid var(--accent);
+      background: transparent;
+      color: var(--accent);
+      padding: 1rem 2rem;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+      width: 100%;
+    }
+
+    .btn-analyze:hover:not(:disabled) {
+      background: var(--accent);
+      color: var(--bg);
+      box-shadow: 0 0 30px var(--glow);
+    }
+
+    .btn-analyze:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+      border-color: var(--muted);
+      color: var(--muted);
+    }
+
+    /* ── Clear Button ───────────────────────────────────────────── */
+    .btn-clear {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 0.6rem 1.2rem;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.6rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+      display: none;
+    }
+
+    .btn-clear:hover { border-color: var(--error); color: var(--error); }
+
+    /* ── Results Panel ──────────────────────────────────────────── */
+    .panel-result {
+      padding: 3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+    }
+
+    /* ── States ─────────────────────────────────────────────────── */
+    .state {
+      display: none;
+      flex-direction: column;
+      gap: 1.5rem;
+      animation: fadeIn 0.4s ease;
+    }
+
+    .state.active { display: flex; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Empty state */
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 1rem;
+      opacity: 0.35;
+    }
+
+    .empty-state.active { display: flex; }
+
+    .empty-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .empty-item {
+      border: 1px solid var(--border);
+      aspect-ratio: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+    }
+
+    .empty-msg {
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* Loading state */
+    .loading-ring {
+      width: 48px;
+      height: 48px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-text {
+      font-size: 0.65rem;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* ── Result Card ────────────────────────────────────────────── */
+    .result-emoji {
+      font-size: 4rem;
+      line-height: 1;
+    }
+
+    .result-class {
+      font-family: 'Playfair Display', serif;
+      font-size: 2.5rem;
+      font-weight: 900;
+      color: var(--accent);
+      line-height: 1;
+    }
+
+    .result-id {
+      font-size: 0.6rem;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .accuracy-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      border-top: 1px solid var(--border);
+      padding-top: 1.5rem;
+    }
+
+    .accuracy-label {
+      font-size: 0.6rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .accuracy-bar-wrap {
+      flex: 1;
+      height: 2px;
+      background: var(--border);
+      position: relative;
+    }
+
+    .accuracy-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    .accuracy-val {
+      font-size: 0.65rem;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    /* ── Probabilities ──────────────────────────────────────────── */
+    .prob-title {
+      font-size: 0.6rem;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      padding-top: 1.5rem;
+    }
+
+    .prob-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .prob-item {
+      display: grid;
+      grid-template-columns: 1fr 3fr auto;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.6rem;
+    }
+
+    .prob-name {
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .prob-name.top { color: var(--accent); }
+
+    .prob-bar {
+      height: 1px;
+      background: var(--border);
+      position: relative;
+    }
+
+    .prob-fill {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      background: var(--muted);
+      transition: width 0.8s ease;
+    }
+
+    .prob-fill.top { background: var(--accent); }
+
+    .prob-pct { color: var(--muted); white-space: nowrap; }
+    .prob-pct.top { color: var(--accent); }
+
+    /* ── Error state ────────────────────────────────────────────── */
+    .error-icon { font-size: 2rem; }
+    .error-msg {
+      font-size: 0.7rem;
+      color: var(--error);
+      letter-spacing: 0.1em;
+    }
+
+    /* ── Footer ─────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 1.2rem 3rem;
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.58rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* ── Responsive ─────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      main { grid-template-columns: 1fr; }
+      .panel-upload { border-right: none; border-bottom: 1px solid var(--border); }
+      header { padding: 1.5rem; flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<header>
+  <div>
+    <div class="logo">VESTIA</div>
+    <div class="logo-sub">Fashion Intelligence</div>
+  </div>
+  <div class="model-badge">SVM · Fashion-MNIST · 10 Clases</div>
+</header>
+
+<!-- ── Main ────────────────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Upload Panel -->
+  <section class="panel-upload">
+    <div>
+      <div class="panel-label">Entrada</div>
+      <h1 class="panel-title">Sube tu<br/>prenda de ropa</h1>
+    </div>
+
+    <div class="drop-zone" id="dropZone">
+      <input type="file" id="fileInput" accept="image/*" />
+      <img id="preview-img" alt="Vista previa" />
+      <div class="drop-icon">✦</div>
+      <div class="drop-text">Arrastra una imagen o haz clic</div>
+      <div class="drop-hint">PNG · JPG · WEBP</div>
+    </div>
+
+    <div style="display:flex; gap:0.75rem;">
+      <button class="btn-analyze" id="btnAnalyze" disabled>
+        Analizar prenda
+      </button>
+      <button class="btn-clear" id="btnClear">✕ Limpiar</button>
+    </div>
+
+    <p style="font-size:0.58rem; color:var(--muted); line-height:1.7; letter-spacing:0.05em;">
+      ⚠ El modelo fue entrenado con imágenes en escala de grises 28×28px
+      (fondo oscuro). Fotos reales pueden tener menor precisión que imágenes
+      del dataset original.
+    </p>
+  </section>
+
+  <!-- Result Panel -->
+  <section class="panel-result">
+    <div class="panel-label">Resultado</div>
+
+    <!-- Empty -->
+    <div class="empty-state active" id="stateEmpty">
+      <div class="empty-grid">
+        <div class="empty-item">👕</div>
+        <div class="empty-item">👖</div>
+        <div class="empty-item">👗</div>
+        <div class="empty-item">👟</div>
+        <div class="empty-item">👜</div>
+        <div class="empty-item">🧥</div>
+        <div class="empty-item">👡</div>
+        <div class="empty-item">👔</div>
+        <div class="empty-item">👢</div>
+        <div class="empty-item">🧣</div>
+      </div>
+      <div class="empty-msg">Esperando imagen…</div>
+    </div>
+
+    <!-- Loading -->
+    <div class="state" id="stateLoading">
+      <div class="loading-ring"></div>
+      <div class="loading-text">Clasificando prenda…</div>
+    </div>
+
+    <!-- Result -->
+    <div class="state" id="stateResult">
+      <div class="result-emoji" id="resEmoji"></div>
+      <div class="result-class" id="resClass"></div>
+      <div class="result-id"   id="resId"></div>
+
+      <div class="accuracy-row">
+        <div class="accuracy-label">Precisión del modelo</div>
+        <div class="accuracy-bar-wrap">
+          <div class="accuracy-bar-fill" id="accBar" style="width:0%"></div>
+        </div>
+        <div class="accuracy-val" id="accVal"></div>
+      </div>
+
+      <div class="prob-title">Distribución de probabilidades</div>
+      <div class="prob-list" id="probList"></div>
+    </div>
+
+    <!-- Error -->
+    <div class="state" id="stateError">
+      <div class="error-icon">⚠</div>
+      <div class="error-msg" id="errMsg"></div>
+    </div>
+
+  </section>
+</main>
+
+<!-- ── Footer ──────────────────────────────────────────────────────────── -->
+<footer>
+  <span>Clasificador SVM · Fashion-MNIST</span>
+  <span>Inteligencia Artificial · 2025</span>
+</footer>
+
+<!-- ── Script ──────────────────────────────────────────────────────────── -->
+<script>
+  const dropZone    = document.getElementById('dropZone');
+  const fileInput   = document.getElementById('fileInput');
+  const previewImg  = document.getElementById('preview-img');
+  const btnAnalyze  = document.getElementById('btnAnalyze');
+  const btnClear    = document.getElementById('btnClear');
+
+  const stateEmpty   = document.getElementById('stateEmpty');
+  const stateLoading = document.getElementById('stateLoading');
+  const stateResult  = document.getElementById('stateResult');
+  const stateError   = document.getElementById('stateError');
+
+  let currentFile = null;
+
+  // ── Drag & Drop ──────────────────────────────────────────────────────────
+  dropZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropZone.classList.add('drag-over');
+  });
+
+  dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('drag-over');
+  });
+
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) loadFile(file);
+  });
+
+  fileInput.addEventListener('change', e => {
+    if (e.target.files[0]) loadFile(e.target.files[0]);
+  });
+
+  function loadFile(file) {
+    currentFile = file;
+    const url = URL.createObjectURL(file);
+    previewImg.src = url;
+    dropZone.classList.add('has-image');
+    btnAnalyze.disabled = false;
+    btnClear.style.display = 'block';
+    showState('empty');
+  }
+
+  // ── Clear ────────────────────────────────────────────────────────────────
+  btnClear.addEventListener('click', () => {
+    currentFile = null;
+    previewImg.src = '';
+    fileInput.value = '';
+    dropZone.classList.remove('has-image');
+    btnAnalyze.disabled = true;
+    btnClear.style.display = 'none';
+    showState('empty');
+  });
+
+  // ── Analyze ──────────────────────────────────────────────────────────────
+  btnAnalyze.addEventListener('click', async () => {
+    if (!currentFile) return;
+
+    showState('loading');
+    btnAnalyze.disabled = true;
+
+    const formData = new FormData();
+    formData.append('imagen', currentFile);
+
+    try {
+      const resp = await fetch('/predecir', { method: 'POST', body: formData });
+
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.detail || 'Error del servidor');
+      }
+
+      const data = await resp.json();
+      renderResult(data);
+    } catch (err) {
+      showState('error');
+      document.getElementById('errMsg').textContent = err.message;
+    } finally {
+      btnAnalyze.disabled = false;
+    }
+  });
+
+  // ── Render Result ────────────────────────────────────────────────────────
+  function renderResult(data) {
+    document.getElementById('resEmoji').textContent = data.emoji;
+    document.getElementById('resClass').textContent = data.clase_nombre;
+    document.getElementById('resId').textContent =
+      `Categoría ID: ${data.clase_id} · Confianza del modelo`;
+
+    // Barra de precisión del modelo
+    const acc = data.precision_modelo;
+    document.getElementById('accVal').textContent = acc + '%';
+    setTimeout(() => {
+      document.getElementById('accBar').style.width = acc + '%';
+    }, 100);
+
+    // Probabilidades
+    const probList = document.getElementById('probList');
+    probList.innerHTML = '';
+
+    if (data.probabilidades && Object.keys(data.probabilidades).length) {
+      const sorted = Object.entries(data.probabilidades)
+        .sort((a, b) => b[1] - a[1]);
+
+      const maxVal = sorted[0][1];
+
+      sorted.forEach(([nombre, pct], i) => {
+        const isTop = i === 0;
+        const item = document.createElement('div');
+        item.className = 'prob-item';
+        item.innerHTML = `
+          <span class="prob-name ${isTop ? 'top' : ''}">${nombre}</span>
+          <div class="prob-bar">
+            <div class="prob-fill ${isTop ? 'top' : ''}"
+                 style="width:${(pct / maxVal) * 100}%"></div>
+          </div>
+          <span class="prob-pct ${isTop ? 'top' : ''}">${pct.toFixed(1)}%</span>
+        `;
+        probList.appendChild(item);
+      });
+    } else {
+      probList.innerHTML =
+        '<span style="font-size:0.6rem;color:var(--muted)">Probabilidades no disponibles con este kernel.</span>';
+    }
+
+    showState('result');
+  }
+
+  // ── State manager ────────────────────────────────────────────────────────
+  function showState(name) {
+    stateEmpty.classList.remove('active');
+    stateLoading.classList.remove('active');
+    stateResult.classList.remove('active');
+    stateError.classList.remove('active');
+
+    if (name === 'empty')   stateEmpty.classList.add('active');
+    if (name === 'loading') stateLoading.classList.add('active');
+    if (name === 'result')  stateResult.classList.add('active');
+    if (name === 'error')   stateError.classList.add('active');
+  }
+</script>
+</body>
+</html>
