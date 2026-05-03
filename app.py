@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 import pickle
 import numpy as np
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter
 import io
 import os
 import threading
@@ -10,12 +10,12 @@ import threading
 app = FastAPI(title="Clasificador de Ropa - SVM")
 
 MODEL_PATH = "modelo_svm.pkl"
-TRAIN_SIZE = 10000  # Reducido para que entrene más rápido en Railway
+TRAIN_SIZE = 30000
 
-modelo    = None
-scaler    = None
-clases    = None
-accuracy  = 0
+modelo     = None
+scaler     = None
+clases     = None
+accuracy   = 0
 entrenando = False
 estado_msg = "iniciando"
 
@@ -26,14 +26,13 @@ def entrenar_y_guardar():
         print("=" * 50)
         print("  Modelo no encontrado. Entrenando...")
         print("=" * 50)
-
         from sklearn.model_selection import train_test_split
         from sklearn.svm import SVC
         from sklearn.preprocessing import StandardScaler
+        import tensorflow.keras as keras
 
         print("[1/5] Descargando Fashion-MNIST via keras...")
         estado_msg = "descargando datos"
-        import tensorflow.keras as keras
         (X_train_full, y_train_full), (X_test_full, y_test_full) = keras.datasets.fashion_mnist.load_data()
         X_all = np.concatenate([X_train_full, X_test_full]).reshape(-1, 784).astype(np.float32)
         y_all = np.concatenate([y_train_full, y_test_full]).astype(str)
@@ -99,15 +98,54 @@ EMOJIS = {
 
 def preprocesar(imagen_bytes: bytes) -> np.ndarray:
     img = Image.open(io.BytesIO(imagen_bytes)).convert("L")
-    img = img.crop(img.getbbox())
-    img = ImageEnhance.Contrast(img).enhance(2.5)
-    canvas = Image.new("L", (max(img.size), max(img.size)), 0)
-    offset = ((canvas.width - img.width) // 2, (canvas.height - img.height) // 2)
-    canvas.paste(img, offset)
-    img = canvas.resize((28, 28), Image.LANCZOS)
+    
+    # 1. Detectar si el fondo es claro u oscuro
+    esquinas = [
+        img.getpixel((0, 0)),
+        img.getpixel((img.width-1, 0)),
+        img.getpixel((0, img.height-1)),
+        img.getpixel((img.width-1, img.height-1)),
+    ]
+    fondo_promedio = sum(esquinas) / len(esquinas)
+    
+    # 2. Si el fondo es claro (foto real), invertir para que objeto sea blanco
+    if fondo_promedio > 128:
+        img = Image.fromarray(255 - np.array(img))
+    
+    # 3. Umbralizar para eliminar fondos grises y sombras
     arr = np.array(img, dtype=np.float32)
-    if arr.mean() > 127:
-        arr = 255 - arr
+    # Todo lo que sea menor al 20% del máximo lo ponemos en negro
+    umbral = arr.max() * 0.20
+    arr[arr < umbral] = 0
+    img = Image.fromarray(arr.astype(np.uint8))
+    
+    # 4. Recortar solo el objeto
+    bbox = img.getbbox()
+    if bbox:
+        img = img.crop(bbox)
+    
+    # 5. Aumentar contraste para que el objeto sea bien visible
+    img = ImageEnhance.Contrast(img).enhance(3.0)
+    
+    # 6. Centrar en canvas cuadrado con padding (como Fashion-MNIST)
+    lado = max(img.size)
+    padding = int(lado * 0.1)
+    canvas_size = lado + padding * 2
+    canvas = Image.new("L", (canvas_size, canvas_size), 0)
+    offset = (
+        (canvas_size - img.width) // 2,
+        (canvas_size - img.height) // 2
+    )
+    canvas.paste(img, offset)
+    
+    # 7. Resize a 28x28
+    img = canvas.resize((28, 28), Image.LANCZOS)
+    
+    # 8. Normalizar a rango Fashion-MNIST (objeto blanco, fondo negro)
+    arr = np.array(img, dtype=np.float32)
+    if arr.max() > 0:
+        arr = arr / arr.max() * 255
+    
     return arr.flatten().reshape(1, -1)
 
 @app.get("/", response_class=HTMLResponse)
