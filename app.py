@@ -5,13 +5,22 @@ import numpy as np
 from PIL import Image, ImageEnhance
 import io
 import os
+import threading
 
 app = FastAPI(title="Clasificador de Ropa - SVM")
 
 MODEL_PATH  = "modelo_svm.pkl"
 TRAIN_SIZE  = 30000
 
+modelo   = None
+scaler   = None
+clases   = None
+accuracy = 0
+entrenando = False
+
 def entrenar_y_guardar():
+    global modelo, scaler, clases, accuracy, entrenando
+    entrenando = True
     print("=" * 50)
     print("  Modelo no encontrado. Entrenando...")
     print("=" * 50)
@@ -25,38 +34,42 @@ def entrenar_y_guardar():
     print(f"[2/5] Seleccionando {TRAIN_SIZE} muestras...")
     X_s, _, y_s, _ = train_test_split(X, y, train_size=TRAIN_SIZE, stratify=y, random_state=42)
     print("[3/5] Escalando datos...")
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X_s)
+    sc = StandardScaler()
+    X_scaled = sc.fit_transform(X_s)
     print("[4/5] Dividiendo 80/20...")
     X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_s, test_size=0.2, random_state=42)
     print("[5/5] Entrenando SVM (paciencia)...")
     clf = SVC(kernel='rbf', C=10, gamma='scale', probability=True)
     clf.fit(X_train, y_train)
-    accuracy = clf.score(X_test, y_test)
-    print(f"\nPrecision: {accuracy:.4f} ({accuracy*100:.2f}%)")
-    modelo_datos = {
-        'modelo': clf, 'scaler': scaler, 'accuracy': accuracy,
+    acc = clf.score(X_test, y_test)
+    print(f"\nPrecision: {acc:.4f} ({acc*100:.2f}%)")
+    datos = {
+        'modelo': clf, 'scaler': sc, 'accuracy': acc,
         'train_size': TRAIN_SIZE,
         'clases': ['T-shirt/top','Trouser','Pullover','Dress','Coat',
                    'Sandal','Shirt','Sneaker','Bag','Ankle boot']
     }
     with open(MODEL_PATH, 'wb') as f:
-        pickle.dump(modelo_datos, f)
+        pickle.dump(datos, f)
+    modelo   = clf
+    scaler   = sc
+    clases   = datos['clases']
+    accuracy = acc
+    entrenando = False
     print(f"Modelo guardado: {MODEL_PATH}")
-    return modelo_datos
 
-if not os.path.exists(MODEL_PATH):
-    datos = entrenar_y_guardar()
-else:
+if os.path.exists(MODEL_PATH):
     print(f"Cargando modelo existente: {MODEL_PATH}")
     with open(MODEL_PATH, "rb") as f:
         datos = pickle.load(f)
-
-modelo   = datos["modelo"]
-scaler   = datos["scaler"]
-clases   = datos["clases"]
-accuracy = datos.get("accuracy", 0)
-print(f"Listo | Precision: {accuracy:.4f}")
+    modelo   = datos["modelo"]
+    scaler   = datos["scaler"]
+    clases   = datos["clases"]
+    accuracy = datos.get("accuracy", 0)
+    print(f"Listo | Precision: {accuracy:.4f}")
+else:
+    hilo = threading.Thread(target=entrenar_y_guardar, daemon=True)
+    hilo.start()
 
 EMOJIS = {
     "T-shirt/top":"👕","Trouser":"👖","Pullover":"🧥","Dress":"👗",
@@ -82,8 +95,18 @@ async def frontend():
     with open("templates/index.html", "r", encoding="utf-8") as f:
         return f.read()
 
+@app.get("/estado")
+async def estado():
+    if entrenando:
+        return {"estado": "entrenando", "listo": False}
+    if modelo is None:
+        return {"estado": "iniciando", "listo": False}
+    return {"estado": "listo", "listo": True, "precision": round(float(accuracy)*100, 2)}
+
 @app.post("/predecir")
 async def predecir(imagen: UploadFile = File(...)):
+    if modelo is None:
+        raise HTTPException(status_code=503, detail="Modelo aún entrenando, intenta en unos minutos.")
     if not imagen.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Debe ser una imagen.")
     contenido = await imagen.read()
