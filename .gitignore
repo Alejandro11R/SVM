@@ -1,4 +1,7 @@
 venv/
 __pycache__/
 *.pyc
-.env
+.envmodelo_svm.pkl
+venv/
+__pycache__/
+*.pyc
