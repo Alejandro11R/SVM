@@ -8,18 +8,21 @@ import os
 
 app = FastAPI(title="Clasificador de Ropa - SVM")
 
-MODEL_PATH = "modelo_svm.pkl"
-HF_REPO    = "xAlejo/svm-fashion"
+HF_REPO   = "xAlejo/svm-fashion"
+HF_FILE   = "modelo_svm.pkl"
+MODEL_PATH = "/tmp/modelo_svm.pkl"
 
-if not os.path.exists(MODEL_PATH):
-    print("Descargando modelo desde Hugging Face...")
-    from huggingface_hub import hf_hub_download
-    ruta = hf_hub_download(repo_id=HF_REPO, filename="modelo_svm.pkl", repo_type="model")
-    import shutil
-    shutil.copy(ruta, MODEL_PATH)
-    print("Modelo descargado!")
+print("Descargando modelo desde Hugging Face...")
+from huggingface_hub import hf_hub_download
+ruta = hf_hub_download(
+    repo_id=HF_REPO,
+    filename=HF_FILE,
+    repo_type="model",
+    force_download=True,
+    local_dir="/tmp"
+)
+print(f"Modelo en: {ruta}")
 
-print(f"Cargando modelo: {MODEL_PATH}")
 with open(MODEL_PATH, "rb") as f:
     datos = pickle.load(f)
 
